@@ -1,0 +1,7 @@
+{
+    "scripts": {
+        "build": "bun build src/index.ts --outdir dist",
+        "start": "bun run dist/index.js",
+        "dev": "bun run src/index.ts"
+    }
+}

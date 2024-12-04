@@ -1,0 +1,134 @@
+import { Logger } from './Logger';
+
+interface RiskParameters {
+    maxPositionSize: number;
+    maxDrawdownPercent: number;
+    stopLossPercent: number;
+    takeProfitPercent: number;
+}
+
+interface PositionRisk {
+    symbol: string;
+    entryPrice: number;
+    currentPrice: number;
+    quantity: number;
+    unrealizedPnL: number;
+    drawdown: number;
+}
+
+export class RiskManager {
+    private static instance: RiskManager;
+    private logger: Logger;
+    private riskParameters: RiskParameters;
+    private positions: Map<string, PositionRisk>;
+    private initialBalance: number;
+    private currentBalance: number;
+
+    private constructor() {
+        this.logger = Logger.getInstance();
+        this.positions = new Map();
+        this.initialBalance = 0;
+        this.currentBalance = 0;
+        this.riskParameters = {
+            maxPositionSize: 0,
+            maxDrawdownPercent: 0,
+            stopLossPercent: 0,
+            takeProfitPercent: 0
+        };
+    }
+
+    static getInstance(): RiskManager {
+        if (!RiskManager.instance) {
+            RiskManager.instance = new RiskManager();
+        }
+        return RiskManager.instance;
+    }
+
+    setRiskParameters(params: RiskParameters): void {
+        this.riskParameters = params;
+        this.logger.info('Risk parameters updated:', params);
+    }
+
+    setInitialBalance(balance: number): void {
+        this.initialBalance = balance;
+        this.currentBalance = balance;
+        this.logger.info(`Initial balance set to: ${balance}`);
+    }
+
+    validatePosition(symbol: string, price: number, quantity: number): boolean {
+        const positionValue = price * quantity;
+
+        // Check position size limit
+        if (positionValue > this.riskParameters.maxPositionSize) {
+            this.logger.warn(`Position size ${positionValue} exceeds maximum ${this.riskParameters.maxPositionSize}`);
+            return false;
+        }
+
+        // Check account drawdown
+        const drawdown = this.calculateDrawdown();
+        if (drawdown > this.riskParameters.maxDrawdownPercent) {
+            this.logger.warn(`Current drawdown ${drawdown}% exceeds maximum ${this.riskParameters.maxDrawdownPercent}%`);
+            return false;
+        }
+
+        return true;
+    }
+
+    updatePosition(symbol: string, currentPrice: number): void {
+        const position = this.positions.get(symbol);
+        if (!position) return;
+
+        const unrealizedPnL = (currentPrice - position.entryPrice) * position.quantity;
+        const drawdown = (unrealizedPnL / (position.entryPrice * position.quantity)) * 100;
+
+        this.positions.set(symbol, {
+            ...position,
+            currentPrice,
+            unrealizedPnL,
+            drawdown
+        });
+
+        this.checkStopLoss(symbol);
+        this.checkTakeProfit(symbol);
+    }
+
+    private checkStopLoss(symbol: string): void {
+        const position = this.positions.get(symbol);
+        if (!position) return;
+
+        const drawdown = Math.abs(position.drawdown);
+        if (drawdown >= this.riskParameters.stopLossPercent) {
+            this.logger.warn(`Stop loss triggered for ${symbol} at ${drawdown}% drawdown`);
+            // Implement stop loss action here
+        }
+    }
+
+    private checkTakeProfit(symbol: string): void {
+        const position = this.positions.get(symbol);
+        if (!position) return;
+
+        const profit = position.drawdown;
+        if (profit >= this.riskParameters.takeProfitPercent) {
+            this.logger.info(`Take profit triggered for ${symbol} at ${profit}% profit`);
+            // Implement take profit action here
+        }
+    }
+
+    private calculateDrawdown(): number {
+        const totalValue = Array.from(this.positions.values())
+            .reduce((sum, pos) => sum + (pos.currentPrice * pos.quantity), 0);
+        return ((this.initialBalance - totalValue) / this.initialBalance) * 100;
+    }
+
+    getRiskParameters(): RiskParameters {
+        return this.riskParameters;
+    }
+
+    getPositionRisk(symbol: string): PositionRisk | undefined {
+        return this.positions.get(symbol);
+    }
+
+    getAllPositionRisks(): Map<string, PositionRisk> {
+        return this.positions;
+    }
+}

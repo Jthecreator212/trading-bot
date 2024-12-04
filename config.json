@@ -1,0 +1,15 @@
+{
+    "exchange": "binance",
+    "apiKey": "your-binance-api-key",
+    "apiSecret": "your-binance-api-secret",
+    "pairs": ["BTCUSDT", "ETHUSDT"],
+    "intervals": {
+        "default": 60000
+    },
+    "risk": {
+        "maxPositionSize": 1000,
+        "maxDrawdownPercent": 2,
+        "stopLossPercent": 1,
+        "takeProfitPercent": 2
+    }
+}

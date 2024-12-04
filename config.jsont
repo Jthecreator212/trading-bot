@@ -1,0 +1,18 @@
+{
+    "exchange": "binance",
+    "mode": "paper",
+    "pairs": ["BTCUSDT", "ETHUSDT"],
+    "intervals": {
+        "default": 60000
+    },
+    "paperTrading": {
+        "initialBalance": 10000,
+        "quoteCurrency": "USDT"
+    },
+    "risk": {
+        "maxPositionSize": 1000,
+        "maxDrawdownPercent": 2,
+        "stopLossPercent": 1,
+        "takeProfitPercent": 2
+    }
+}
