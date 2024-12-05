@@ -1,7 +1,21 @@
 {
-    "scripts": {
-        "build": "bun build src/index.ts --outdir dist",
-        "start": "bun run dist/index.js",
-        "dev": "bun run src/index.ts"
-    }
+  "name": "trading-bot",
+  "module": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch src/index.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "dependencies": {
+    "@types/events": "^3.0.3",
+    "@types/jest": "^29.5.14",
+    "@types/ws": "^8.5.13",
+    "events": "^3.3.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "ws": "^8.18.0"
+  }
 }

@@ -1,0 +1,22 @@
+{
+  "exchange": {
+    "name": "binance",
+    "apiKey": "",
+    "apiSecret": "",
+    "testnet": true
+  },
+  "trading": {
+    "pairs": ["BTCUSDT", "ETHUSDT"],
+    "interval": "1m",
+    "maxPositions": 3
+  },
+  "risk": {
+    "maxPositionSize": 0.01,
+    "stopLossPercentage": 2,
+    "takeProfitPercentage": 4
+  },
+  "monitoring": {
+    "logLevel": "info",
+    "metricsInterval": 60000
+  }
+}

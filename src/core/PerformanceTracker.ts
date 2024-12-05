@@ -1,56 +1,107 @@
+import { EventEmitter } from 'events';
 import { Logger } from './Logger';
 
-interface Trade {
+interface TradeMetrics {
     symbol: string;
-    entryPrice: number;
-    exitPrice: number;
-    quantity: number;
-    side: 'LONG' | 'SHORT';
-    pnl: number;
+    profit: number;
+    winRate: number;
+    totalTrades: number;
+    successfulTrades: number;
+    failedTrades: number;
+    averageProfit: number;
+    maxDrawdown: number;
     timestamp: number;
 }
 
-export class PerformanceTracker {
+export class PerformanceTracker extends EventEmitter {
     private logger: Logger;
-    private trades: Trade[];
-    private initialBalance: number;
-    private currentBalance: number;
+    private metrics: Map<string, TradeMetrics>;
+    private historicalMetrics: Map<string, TradeMetrics[]>;
 
-    constructor(initialBalance: number = 10000) {
-        this.logger = Logger.getInstance();
-        this.trades = [];
-        this.initialBalance = initialBalance;
-        this.currentBalance = initialBalance;
+    constructor() {
+        super();
+        this.logger = new Logger();
+        this.metrics = new Map();
+        this.historicalMetrics = new Map();
     }
 
-    logTrade(trade: Trade): void {
-        this.trades.push(trade);
-        this.currentBalance += trade.pnl;
-        this.logger.info(`Logged trade for ${trade.symbol}: PnL = ${trade.pnl.toFixed(2)} USDT`);
+    public updateMetrics(symbol: string, tradeResult: any): void {
+        const currentMetrics = this.getOrCreateMetrics(symbol);
+        
+        // Update metrics based on trade result
+        currentMetrics.totalTrades++;
+        if (tradeResult.profit > 0) {
+            currentMetrics.successfulTrades++;
+            currentMetrics.profit += tradeResult.profit;
+        } else {
+            currentMetrics.failedTrades++;
+            currentMetrics.profit += tradeResult.profit;
+        }
+
+        // Calculate derived metrics
+        currentMetrics.winRate = (currentMetrics.successfulTrades / currentMetrics.totalTrades) * 100;
+        currentMetrics.averageProfit = currentMetrics.profit / currentMetrics.totalTrades;
+        currentMetrics.timestamp = Date.now();
+
+        // Update historical metrics
+        this.updateHistoricalMetrics(symbol, currentMetrics);
+
+        // Emit metrics update event
+        this.emit('metricsUpdate', { symbol, metrics: currentMetrics });
+        this.logger.info(`Updated performance metrics for ${symbol}`);
     }
 
-    generateReport(): void {
-        const totalTrades = this.trades.length;
-        const winningTrades = this.trades.filter(t => t.pnl > 0).length;
-        const losingTrades = totalTrades - winningTrades;
-        const winRate = (winningTrades / totalTrades) * 100;
-        const totalPnL = this.trades.reduce((acc, trade) => acc + trade.pnl, 0);
-        const returnOnInvestment = ((this.currentBalance - this.initialBalance) / this.initialBalance) * 100;
-
-        this.logger.info('Performance Report:');
-        this.logger.info(`Total Trades: ${totalTrades}`);
-        this.logger.info(`Winning Trades: ${winningTrades}`);
-        this.logger.info(`Losing Trades: ${losingTrades}`);
-        this.logger.info(`Win Rate: ${winRate.toFixed(2)}%`);
-        this.logger.info(`Total PnL: ${totalPnL.toFixed(2)} USDT`);
-        this.logger.info(`Return on Investment: ${returnOnInvestment.toFixed(2)}%`);
+    private getOrCreateMetrics(symbol: string): TradeMetrics {
+        if (!this.metrics.has(symbol)) {
+            this.metrics.set(symbol, {
+                symbol,
+                profit: 0,
+                winRate: 0,
+                totalTrades: 0,
+                successfulTrades: 0,
+                failedTrades: 0,
+                averageProfit: 0,
+                maxDrawdown: 0,
+                timestamp: Date.now()
+            });
+        }
+        return this.metrics.get(symbol)!;
     }
 
-    getCurrentBalance(): number {
-        return this.currentBalance;
+    private updateHistoricalMetrics(symbol: string, currentMetrics: TradeMetrics): void {
+        if (!this.historicalMetrics.has(symbol)) {
+            this.historicalMetrics.set(symbol, []);
+        }
+        this.historicalMetrics.get(symbol)!.push({ ...currentMetrics });
     }
 
-    getTradeHistory(): Trade[] {
-        return this.trades;
+    public getMetrics(symbol: string): TradeMetrics | undefined {
+        return this.metrics.get(symbol);
+    }
+
+    public getAllMetrics(): Map<string, TradeMetrics> {
+        return new Map(this.metrics);
+    }
+
+    public getHistoricalMetrics(symbol: string): TradeMetrics[] {
+        return this.historicalMetrics.get(symbol) || [];
+    }
+
+    public calculateDrawdown(symbol: string): number {
+        const history = this.getHistoricalMetrics(symbol);
+        if (history.length === 0) return 0;
+
+        let peak = -Infinity;
+        let maxDrawdown = 0;
+
+        history.forEach(metric => {
+            if (metric.profit > peak) {
+                peak = metric.profit;
+            }
+            const drawdown = ((peak - metric.profit) / peak) * 100;
+            maxDrawdown = Math.max(maxDrawdown, drawdown);
+        });
+
+        return maxDrawdown;
     }
 }

@@ -1,146 +1,121 @@
+import { EventEmitter } from 'events';
 import { Logger } from './Logger';
-import { BaseStrategy } from '../strategies/BaseStrategy';
 import { ConfigManager } from './ConfigManager';
 import { RiskManager } from './RiskManager';
 import { PositionManager } from './PositionManager';
 import { MarketDepth } from './MarketDepth';
-import { AlertSystem, AlertLevel } from './AlertSystem';
 import { TradeLogger } from './TradeLogger';
 import { WebSocketManager } from './WebSocketManager';
 import { MarketSentimentAnalyzer } from './MarketSentimentAnalyzer';
 import { PerformanceTracker } from './PerformanceTracker';
+import { NotificationService } from './NotificationService';
+import { MonitoringService } from '../monitoring/MonitoringService';
 
-export class TradingEngine {
+export class TradingEngine extends EventEmitter {
+    private static instance: TradingEngine;
+    private components: Map<string, any>;
     private logger: Logger;
     private config: ConfigManager;
     private riskManager: RiskManager;
     private positionManager: PositionManager;
     private marketDepth: MarketDepth;
-    private alertSystem: AlertSystem;
     private tradeLogger: TradeLogger;
     private wsManager: WebSocketManager;
     private sentimentAnalyzer: MarketSentimentAnalyzer;
     private performanceTracker: PerformanceTracker;
-    private strategies: Map<string, BaseStrategy>;
-    private isRunning: boolean;
+    private notificationService: NotificationService;
+    private monitoringService: MonitoringService;
+    private isRunning: boolean = false;
 
-    constructor() {
+    private constructor() {
+        super();
+        this.components = new Map();
+        this.initializeComponents();
+        this.setupEventHandlers();
+    }
+
+    private initializeComponents(): void {
         this.logger = Logger.getInstance();
-        this.config = ConfigManager.getInstance();
-        this.riskManager = RiskManager.getInstance();
+        this.config = new ConfigManager();
+        this.riskManager = new RiskManager();
         this.positionManager = new PositionManager();
-        this.marketDepth = MarketDepth.getInstance();
-        this.alertSystem = AlertSystem.getInstance();
-        this.tradeLogger = TradeLogger.getInstance();
-        this.wsManager = WebSocketManager.getInstance();
-        this.sentimentAnalyzer = MarketSentimentAnalyzer.getInstance();
+        this.marketDepth = new MarketDepth();
+        this.tradeLogger = new TradeLogger();
+        this.wsManager = new WebSocketManager();
+        this.sentimentAnalyzer = new MarketSentimentAnalyzer();
         this.performanceTracker = new PerformanceTracker();
-        this.strategies = new Map();
-        this.isRunning = false;
+        this.notificationService = new NotificationService();
+        this.monitoringService = new MonitoringService();
+
+        // Register core components
+        this.register('logger', this.logger);
+        this.register('config', this.config);
+        this.register('riskManager', this.riskManager);
+        this.register('positionManager', this.positionManager);
+        this.register('marketDepth', this.marketDepth);
+        this.register('tradeLogger', this.tradeLogger);
+        this.register('wsManager', this.wsManager);
+        this.register('sentimentAnalyzer', this.sentimentAnalyzer);
+        this.register('performanceTracker', this.performanceTracker);
+        this.register('notificationService', this.notificationService);
+        this.register('monitoringService', this.monitoringService);
     }
 
-    async start(): Promise<void> {
+    private setupEventHandlers(): void {
+        this.monitoringService.on('metrics', (metrics) => {
+            this.logger.info('System metrics update:', metrics);
+        });
+
+        this.performanceTracker.on('performanceUpdate', (metrics) => {
+            this.monitoringService.trackMetric('performance', metrics);
+        });
+    }
+
+    public static getInstance(): TradingEngine {
+        if (!TradingEngine.instance) {
+            TradingEngine.instance = new TradingEngine();
+        }
+        return TradingEngine.instance;
+    }
+
+    public register(name: string, component: any): void {
+        this.components.set(name, component);
+        this.logger.info(`Registered component: ${name}`);
+    }
+
+    public getComponent<T>(name: string): T {
+        return this.components.get(name) as T;
+    }
+
+    public start(): void {
         try {
-            this.logger.info('Starting Trading Engine...');
             this.isRunning = true;
-
-            // Initialize WebSocket connections for each trading pair
-            for (const strategy of this.strategies.values()) {
-                const symbol = strategy.getSymbol();
-                await this.wsManager.createConnection({
-                    url: `wss://stream.binance.com:9443/ws/${symbol.toLowerCase()}@trade`,
-                    symbol,
-                    type: 'trades'
-                });
-
-                // Initialize market depth tracking
-                await this.marketDepth.connectToSymbol(symbol);
-
-                // Start sentiment analysis
-                await this.sentimentAnalyzer.analyzeSentiment(symbol);
-            }
-
-            // Start strategy execution
-            for (const strategy of this.strategies.values()) {
-                this.executeStrategy(strategy);
-            }
-
-            // Start position monitoring
-            this.startPositionMonitoring();
-
-            this.alertSystem.sendAlert(AlertLevel.INFO, 'Trading Engine started successfully');
-            this.logger.info('Trading Engine started successfully');
-
+            this.monitoringService.startMonitoring();
+            const wsUrl = process.env.WEBSOCKET_URL || 'wss://stream.binance.com:9443/ws';
+            this.wsManager.connect(wsUrl, 'yourSymbol');
+            this.logger.info('Trading Engine started');
+            this.emit('engineStart');
         } catch (error) {
-            this.logger.error('Error starting Trading Engine:', error as Error);
-            this.alertSystem.sendAlert(AlertLevel.CRITICAL, 'Failed to start Trading Engine');
-            throw error;
+            this.logger.error('Failed to start Trading Engine:', error);
+            this.stop();
         }
     }
 
-    async stop(): Promise<void> {
+    public stop(): void {
         try {
-            this.logger.info('Stopping Trading Engine...');
             this.isRunning = false;
-
-            // Stop all WebSocket connections
-            await this.wsManager.closeAllConnections();
-
-            // Stop market depth tracking
-            this.marketDepth.stop();
-
-            // Stop sentiment analyzer
-            this.sentimentAnalyzer.stop();
-
-            // Generate final performance report
-            this.performanceTracker.generateReport();
-
-            this.alertSystem.sendAlert(AlertLevel.INFO, 'Trading Engine stopped successfully');
-            this.logger.info('Trading Engine stopped successfully');
-
+            this.monitoringService.stopMonitoring();
+            this.wsManager.disconnect();
+            this.logger.info('Trading Engine stopped');
+            this.emit('engineStop');
         } catch (error) {
-            this.logger.error('Error stopping Trading Engine:', error as Error);
-            this.alertSystem.sendAlert(AlertLevel.CRITICAL, 'Error stopping Trading Engine');
-            throw error;
+            this.logger.error('Error stopping Trading Engine:', error);
         }
     }
 
-    addStrategy(strategy: BaseStrategy): void {
-        this.strategies.set(strategy.getSymbol(), strategy);
-        this.logger.info(`Added strategy for ${strategy.getSymbol()}`);
-    }
-
-    private async executeStrategy(strategy: BaseStrategy): Promise<void> {
-        while (this.isRunning) {
-            try {
-                await strategy.execute();
-                await this.sleep(strategy.getInterval());
-            } catch (error) {
-                this.logger.error(`Error executing strategy for ${strategy.getSymbol()}:`, error as Error);
-                this.alertSystem.sendAlert(
-                    AlertLevel.DANGER,
-                    `Strategy execution error for ${strategy.getSymbol()}`
-                );
-            }
-        }
-    }
-
-    private startPositionMonitoring(): void {
-        setInterval(() => {
-            if (!this.isRunning) return;
-
-            try {
-                const positions = this.positionManager.getOpenPositions();
-                for (const position of positions) {
-                    this.positionManager.updatePosition(position.symbol);
-                }
-            } catch (error) {
-                this.logger.error('Error monitoring positions:', error as Error);
-            }
-        }, 1000); // Check positions every second
-    }
-
-    private sleep(ms: number): Promise<void> {
-        return new Promise(resolve => setTimeout(resolve, ms));
+    public isEngineRunning(): boolean {
+        return this.isRunning;
     }
 }
+
+export default TradingEngine;

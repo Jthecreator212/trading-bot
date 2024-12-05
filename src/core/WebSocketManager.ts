@@ -1,133 +1,95 @@
-import WebSocket from 'ws';
 import { Logger } from './Logger';
+import WebSocket from 'ws';
 import { EventEmitter } from 'events';
 
-interface WebSocketConfig {
-    url: string;
-    symbol: string;
-    type: 'ticker' | 'depth' | 'kline' | 'trades';
-}
-
 export class WebSocketManager extends EventEmitter {
-    private static instance: WebSocketManager;
     private logger: Logger;
     private connections: Map<string, WebSocket>;
-    private connectionConfigs: Map<string, WebSocketConfig>;
-    private reconnectAttempts: Map<string, number>;
-    private maxReconnectAttempts: number;
-    private reconnectDelay: number;
+    private wsUrl: string;
 
-    private constructor() {
+    constructor() {
         super();
         this.logger = Logger.getInstance();
         this.connections = new Map();
-        this.connectionConfigs = new Map();
-        this.reconnectAttempts = new Map();
-        this.maxReconnectAttempts = 5;
-        this.reconnectDelay = 5000; // 5 seconds
+        this.wsUrl = process.env.WEBSOCKET_URL || 'wss://stream.binance.com:9443/ws';
     }
 
-    static getInstance(): WebSocketManager {
-        if (!WebSocketManager.instance) {
-            WebSocketManager.instance = new WebSocketManager();
-        }
-        return WebSocketManager.instance;
-    }
-
-    async createConnection(config: WebSocketConfig): Promise<void> {
-        const connectionId = `${config.symbol}_${config.type}`;
-        
-        if (this.connections.has(connectionId)) {
-            this.logger.warn(`WebSocket connection already exists for ${connectionId}`);
+    public connect(url: string, symbol: string): void {
+        if (!url || !this.isValidUrl(url)) {
+            this.logger.error('Invalid WebSocket URL');
             return;
         }
 
-        this.connectionConfigs.set(connectionId, config);
-        await this.connect(connectionId);
-    }
-
-    private async connect(connectionId: string): Promise<void> {
-        const config = this.connectionConfigs.get(connectionId);
-        if (!config) return;
-
         try {
-            const ws = new WebSocket(config.url);
+            this.logger.info(`Connecting to WebSocket for ${symbol}`);
+            const ws = new WebSocket(url);
 
             ws.on('open', () => {
-                this.logger.info(`WebSocket connected for ${connectionId}`);
-                this.reconnectAttempts.set(connectionId, 0);
-                this.emit('connected', connectionId);
+                this.logger.info(`WebSocket connected for ${symbol}`);
+                this.connections.set(symbol, ws);
+                this.emit('connected', symbol);
             });
 
             ws.on('message', (data: WebSocket.Data) => {
                 try {
                     const parsedData = JSON.parse(data.toString());
-                    this.emit('message', connectionId, parsedData);
+                    this.emit('message', symbol, parsedData);
                 } catch (error) {
-                    this.logger.error(`Error parsing message for ${connectionId}:`, error as Error);
+                    this.logger.error(`Error parsing WebSocket message: ${error}`);
                 }
             });
 
-            ws.on('error', (error) => {
-                this.logger.error(`WebSocket error for ${connectionId}:`, error);
-                this.emit('error', connectionId, error);
-            });
-
             ws.on('close', () => {
-                this.logger.warn(`WebSocket closed for ${connectionId}`);
-                this.handleDisconnect(connectionId);
+                this.logger.warn(`WebSocket connection closed for ${symbol}`);
+                this.connections.delete(symbol);
             });
 
-            this.connections.set(connectionId, ws);
-
+            ws.on('error', (error) => {
+                this.logger.error(`WebSocket error for ${symbol}:`, error);
+                this.emit('error', symbol, error);
+            });
         } catch (error) {
-            this.logger.error(`Error creating WebSocket for ${connectionId}:`, error as Error);
-            this.handleDisconnect(connectionId);
+            this.logger.error(`Failed to connect WebSocket for ${symbol}:`, error);
         }
     }
 
-    private async handleDisconnect(connectionId: string): Promise<void> {
-        const attempts = (this.reconnectAttempts.get(connectionId) || 0) + 1;
-        this.reconnectAttempts.set(connectionId, attempts);
-
-        if (attempts <= this.maxReconnectAttempts) {
-            this.logger.info(`Attempting to reconnect ${connectionId} (Attempt ${attempts}/${this.maxReconnectAttempts})`);
-            
-            setTimeout(async () => {
-                await this.connect(connectionId);
-            }, this.reconnectDelay * attempts);
-            
-        } else {
-            this.logger.error(`Max reconnection attempts reached for ${connectionId}`);
-            this.emit('maxReconnectAttemptsReached', connectionId);
+    public disconnect(symbol?: string): void {
+        try {
+            if (symbol) {
+                const ws = this.connections.get(symbol);
+                if (ws) {
+                    ws.close();
+                    this.connections.delete(symbol);
+                    this.logger.info(`WebSocket disconnected for ${symbol}`);
+                }
+            } else {
+                this.connections.forEach((ws, sym) => {
+                    ws.close();
+                    this.logger.info(`WebSocket disconnected for ${sym}`);
+                });
+                this.connections.clear();
+            }
+        } catch (error) {
+            this.logger.error('Error disconnecting WebSocket:', error);
         }
     }
 
-    isConnected(connectionId: string): boolean {
-        const ws = this.connections.get(connectionId);
+    public isConnected(symbol: string): boolean {
+        const ws = this.connections.get(symbol);
         return ws?.readyState === WebSocket.OPEN;
     }
 
-    async closeConnection(connectionId: string): Promise<void> {
-        const ws = this.connections.get(connectionId);
-        if (ws) {
-            ws.close();
-            this.connections.delete(connectionId);
-            this.connectionConfigs.delete(connectionId);
-            this.reconnectAttempts.delete(connectionId);
-            this.logger.info(`Closed WebSocket connection for ${connectionId}`);
-        }
-    }
-
-    async closeAllConnections(): Promise<void> {
-        const connectionIds = Array.from(this.connections.keys());
-        for (const connectionId of connectionIds) {
-            await this.closeConnection(connectionId);
-        }
-        this.logger.info('All WebSocket connections closed');
-    }
-
-    getActiveConnections(): string[] {
+    // Add this method
+    public getConnections(): string[] {
         return Array.from(this.connections.keys());
+    }
+
+    private isValidUrl(url: string): boolean {
+        try {
+            new URL(url);
+            return true;
+        } catch {
+            return false;
+        }
     }
 }

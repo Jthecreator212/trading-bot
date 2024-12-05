@@ -3,18 +3,22 @@
 
        private constructor() {}
 
-       static getInstance(): Logger {
+       public static getInstance(): Logger {
            if (!Logger.instance) {
                Logger.instance = new Logger();
            }
            return Logger.instance;
        }
 
-       info(message: string, context?: any): void {
-           console.log(`[${new Date().toISOString()}] INFO: ${message}`, context || '');
+       public info(message: string, ...args: any[]): void {
+           console.log(`[${new Date().toISOString()}] INFO: ${message}`, ...args);
        }
 
-       error(message: string, error: Error): void {
-           console.error(`[${new Date().toISOString()}] ERROR: ${message}`, error);
+       public error(message: string, ...args: any[]): void {
+           console.error(`[${new Date().toISOString()}] ERROR: ${message}`, ...args);
+       }
+
+       public warn(message: string, ...args: any[]): void {
+           console.warn(`[${new Date().toISOString()}] WARN: ${message}`, ...args);
        }
    }

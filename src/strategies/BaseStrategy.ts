@@ -2,30 +2,23 @@ import { EventEmitter } from 'events';
 import { Logger } from '../core/Logger';
 
 export abstract class BaseStrategy extends EventEmitter {
-    protected logger: Logger;
     protected symbol: string;
     protected interval: number;
-    protected isRunning: boolean = false;
+    protected minVolume: number;
+    protected logger: Logger;
 
-    constructor(symbol: string, interval: number) {
+    constructor(symbol: string, interval: number, minVolume: number) {
         super();
-        this.logger = Logger.getInstance();
         this.symbol = symbol;
         this.interval = interval;
+        this.minVolume = minVolume;
+        this.logger = new Logger();
     }
 
-    getName(): string {
-        return this.symbol;
-    }
-
+    abstract analyze(data: any): Promise<void>;
     abstract execute(): Promise<void>;
 
-    protected async sleep(ms: number): Promise<void> {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-
-    stop(): void {
-        this.isRunning = false;
-        this.logger.info(`Strategy stopped for ${this.symbol}`);
+    protected log(message: string): void {
+        this.logger.info(`[${this.symbol}] ${message}`);
     }
 }

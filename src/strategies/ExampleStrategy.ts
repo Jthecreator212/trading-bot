@@ -1,67 +1,81 @@
-   import { BaseStrategy } from './BaseStrategy';
-   import { MarketData, Order } from '../types';
-   import { MarketUtils } from '../utils/market';
-   import { BaseProvider } from '../providers/BaseProvider';
+import { BaseStrategy } from './BaseStrategy';
+import { TradingEngine } from '../core/Engine';
+import { MarketDepth } from '../core/MarketDepth';
+import { RiskManager } from '../core/RiskManager';
 
-   export class ExampleStrategy extends BaseStrategy {
-       private prices: number[] = [];
-       private readonly rsiPeriod: number = 14;
-       private readonly overbought: number = 70;
-       private readonly oversold: number = 30;
-       private provider: BaseProvider;
+export class ExampleStrategy extends BaseStrategy {
+    private engine: TradingEngine;
+    private marketDepth: MarketDepth;
+    private riskManager: RiskManager;
 
-       constructor(name: string, interval: number, provider: BaseProvider) {
-           super(name, interval);
-           this.provider = provider;
-       }
+    constructor(symbol: string, interval: number, minVolume: number) {
+        super(symbol, interval, minVolume);
+        this.engine = TradingEngine.getInstance();
+        this.marketDepth = this.engine.getComponent<MarketDepth>('marketDepth');
+        this.riskManager = this.engine.getComponent<RiskManager>('riskManager');
+    }
 
-       async execute(): Promise<void> {
-           try {
-               const data = await this.provider.getMarketData(this.name);
-               this.prices.push(data.price);
+    async analyze(data: any): Promise<void> {
+        try {
+            this.log('Analyzing market data...');
+            
+            // Get market depth data
+            const depth = await this.marketDepth.getDepth(this.symbol);
+            
+            // Check if volume meets minimum requirements
+            if (depth.volume < this.minVolume) {
+                this.log('Volume too low, skipping analysis');
+                return;
+            }
 
-               // Keep only necessary price history
-               if (this.prices.length > this.rsiPeriod + 1) {
-                   this.prices.shift();
-               }
+            // Example analysis logic
+            const signal = this.calculateSignal(depth);
+            
+            this.emit('analysisComplete', {
+                symbol: this.symbol,
+                signal: signal,
+                price: depth.price,
+                volume: depth.volume
+            });
 
-               if (this.prices.length <= this.rsiPeriod) {
-                   return;
-               }
+        } catch (error) {
+            this.log(`Analysis error: ${error.message}`);
+        }
+    }
 
-               const rsi = MarketUtils.calculateRSI(this.prices, this.rsiPeriod);
+    async execute(): Promise<void> {
+        try {
+            this.log('Executing trade...');
+            
+            // Check risk parameters before executing
+            if (!this.riskManager.checkTradeRisk(this.symbol)) {
+                this.log('Trade rejected by risk manager');
+                return;
+            }
 
-               let order: Order | null = null;
+            // Example execution logic
+            const order = {
+                symbol: this.symbol,
+                type: 'market',
+                side: 'buy',
+                quantity: 1
+            };
 
-               // Generate signals
-               if (rsi < this.oversold) {
-                   order = {
-                       symbol: data.symbol,
-                       side: 'BUY',
-                       quantity: 1, // Define your position sizing logic
-                       price: data.price,
-                       type: 'MARKET'
-                   };
-               } else if (rsi > this.overbought) {
-                   order = {
-                       symbol: data.symbol,
-                       side: 'SELL',
-                       quantity: 1, // Define your position sizing logic
-                       price: data.price,
-                       type: 'MARKET'
-                   };
-               }
+            this.emit('orderExecuted', order);
+            this.log('Trade executed successfully');
 
-               if (order) {
-                   const success = await this.provider.executeOrder(order);
-                   if (success) {
-                       console.log(`Order executed: ${order.side} ${order.quantity} ${order.symbol} at ${order.price}`);
-                   } else {
-                       console.log('Order execution failed');
-                   }
-               }
-           } catch (error) {
-               console.error(`Error executing strategy: ${error}`);
-           }
-       }
-   }
+        } catch (error) {
+            this.log(`Execution error: ${error.message}`);
+        }
+    }
+
+    private calculateSignal(depth: any): 'buy' | 'sell' | 'hold' {
+        // Example signal calculation
+        const buyPressure = depth.bids.reduce((sum: number, bid: any) => sum + bid.quantity, 0);
+        const sellPressure = depth.asks.reduce((sum: number, ask: any) => sum + ask.quantity, 0);
+        
+        if (buyPressure > sellPressure * 1.2) return 'buy';
+        if (sellPressure > buyPressure * 1.2) return 'sell';
+        return 'hold';
+    }
+}

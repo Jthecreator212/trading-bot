@@ -1,53 +1,32 @@
 import { Logger } from './Logger';
+import { EventEmitter } from 'events';
 
-export interface Notification {
-    id: string;
-    type: 'EMAIL' | 'SMS' | 'PUSH';
-    recipient: string;
-    subject: string;
-    message: string;
-    timestamp: number;
-}
-
-export class NotificationService {
-    private static instance: NotificationService;
+export class NotificationService extends EventEmitter {
     private logger: Logger;
-    private notifications: Notification[];
 
-    private constructor() {
+    constructor() {
+        super();
         this.logger = Logger.getInstance();
-        this.notifications = [];
     }
 
-    static getInstance(): NotificationService {
-        if (!NotificationService.instance) {
-            NotificationService.instance = new NotificationService();
+    public sendAlert(message: string, level: 'info' | 'warning' | 'error' = 'info'): void {
+        try {
+            this.logger.info(`Sending ${level} alert: ${message}`);
+            this.emit('alert', { level, message, timestamp: new Date().toISOString() });
+        } catch (error) {
+            this.logger.error('Error sending alert:', error);
         }
-        return NotificationService.instance;
     }
 
-    sendNotification(notification: Notification): void {
-        this.notifications.push(notification);
-        this.logger.info(`Notification sent: ${notification.subject} to ${notification.recipient}`);
-        
-        // Here you would integrate with an actual notification service
-        // For example, sending an email, SMS, or push notification
-    }
-
-    getNotifications(): Notification[] {
-        return this.notifications;
-    }
-
-    getNotificationsByType(type: 'EMAIL' | 'SMS' | 'PUSH'): Notification[] {
-        return this.notifications.filter(notification => notification.type === type);
-    }
-
-    getNotificationsByRecipient(recipient: string): Notification[] {
-        return this.notifications.filter(notification => notification.recipient === recipient);
-    }
-
-    clearNotifications(): void {
-        this.notifications = [];
-        this.logger.info('All notifications cleared');
+    public sendTradeNotification(trade: any): void {
+        try {
+            this.logger.info('Trade notification:', trade);
+            this.emit('tradeNotification', {
+                ...trade,
+                timestamp: new Date().toISOString()
+            });
+        } catch (error) {
+            this.logger.error('Error sending trade notification:', error);
+        }
     }
 }

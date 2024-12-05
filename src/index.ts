@@ -1,13 +1,15 @@
-import { TradingEngine } from './core/Engine';
+import TradingEngine from './core/Engine';
 import { Logger } from './core/Logger';
 import { BinanceProvider } from './providers/BinanceProvider';
 import { RiskManager } from './core/RiskManager';
+import { ExampleStrategy } from './strategies/ExampleStrategy';
 
 async function main() {
-    const logger = Logger.getInstance();
+    const engine = TradingEngine.getInstance();
+    const logger = engine.getComponent<Logger>('logger');
+    const riskManager = engine.getComponent<RiskManager>('riskManager');
     const provider = new BinanceProvider();
-    const riskManager = RiskManager.getInstance();
-    
+
     logger.info('Trading Bot Starting...');
 
     try {
@@ -19,28 +21,40 @@ async function main() {
             takeProfitPercent: 2
         });
 
-        const engine = new TradingEngine();
-
-        const tradingPairs = [
-            { symbol: 'BTCUSDT', interval: 60000, minVolume: 10000 },
-            { symbol: 'ETHUSDT', interval: 60000, minVolume: 5000 }
+        // Initialize strategies with market pairs
+        const strategies = [
+            new ExampleStrategy('BTCUSDT', 60000, 10000),
+            new ExampleStrategy('ETHUSDT', 60000, 5000)
         ];
 
-        await engine.start();
+        // Register strategy event handlers
+        strategies.forEach(strategy => {
+            strategy.on('analysisComplete', (signal) => {
+                logger.info(`Analysis complete for ${signal.symbol}: ${signal.signal}`);
+                if (signal.signal !== 'hold') {
+                    strategy.execute();
+                }
+            });
 
-        process.on('SIGINT', async () => {
-            logger.info('Initiating graceful shutdown...');
-            await engine.stop();
+            strategy.on('orderExecuted', (order) => {
+                logger.info(`Order executed: ${JSON.stringify(order)}`);
+            });
+        });
+
+        // Start the engine
+        engine.start();
+
+        // Handle shutdown gracefully
+        process.on('SIGINT', () => {
+            logger.info('Shutting down...');
+            engine.stop();
             process.exit(0);
         });
 
     } catch (error) {
-        logger.error('Fatal error:', error as Error);
+        logger.error('Error starting trading bot:', error);
         process.exit(1);
     }
 }
 
-main().catch(error => {
-    console.error('Unhandled error:', error);
-    process.exit(1);
-});
+main().catch(console.error);
