@@ -1,24 +1,27 @@
-   export class Logger {
-       private static instance: Logger;
+export class Logger {
+    constructor() {}
 
-       private constructor() {}
+    public info(message: string, ...args: any[]): void {
+        this.log('INFO', message, ...args);
+    }
 
-       public static getInstance(): Logger {
-           if (!Logger.instance) {
-               Logger.instance = new Logger();
-           }
-           return Logger.instance;
-       }
+    public error(message: string, ...args: any[]): void {
+        this.log('ERROR', message, ...args);
+    }
 
-       public info(message: string, ...args: any[]): void {
-           console.log(`[${new Date().toISOString()}] INFO: ${message}`, ...args);
-       }
+    public warn(message: string, ...args: any[]): void {
+        this.log('WARN', message, ...args);
+    }
 
-       public error(message: string, ...args: any[]): void {
-           console.error(`[${new Date().toISOString()}] ERROR: ${message}`, ...args);
-       }
+    public debug(message: string, ...args: any[]): void {
+        this.log('DEBUG', message, ...args);
+    }
 
-       public warn(message: string, ...args: any[]): void {
-           console.warn(`[${new Date().toISOString()}] WARN: ${message}`, ...args);
-       }
-   }
+    private log(level: string, message: string, ...args: any[]): void {
+        const timestamp = new Date().toISOString();
+        const formattedArgs = args.length > 0 ? JSON.stringify(args) : '';
+        console.log(`[${timestamp}] ${level}: ${message} ${formattedArgs}`);
+    }
+}
+
+export default Logger;

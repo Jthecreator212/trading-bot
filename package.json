@@ -7,9 +7,11 @@
     "dev": "bun --watch src/index.ts"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "bun-types": "^1.1.38"
   },
   "dependencies": {
+    "@tensorflow/tfjs-node": "^4.22.0",
     "@types/events": "^3.0.3",
     "@types/jest": "^29.5.14",
     "@types/ws": "^8.5.13",

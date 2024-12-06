@@ -1,58 +1,99 @@
 import { EventEmitter } from 'events';
 import WebSocket from 'ws';
+import { MarketData } from '../../types';
 
 export class MarketDataAgent extends EventEmitter {
-    private id: string;
-    private interval: number;
-    private ws: WebSocket | null = null;
+    private websocket: WebSocket | null = null;
     private connected: boolean = false;
+    private reconnectAttempts: number = 0;
+    private readonly MAX_RECONNECT_ATTEMPTS = 5;
 
-    constructor(id: string, interval: number) {
+    constructor() {
         super();
-        this.id = id;
-        this.interval = interval;
     }
 
-    async start(): Promise<void> {
-        this.connectWebSocket();
-    }
+    public async connect(symbol: string): Promise<void> {
+        try {
+            // Initialize WebSocket connection
+            const wsEndpoint = `wss://stream.binance.com:9443/ws/${symbol.toLowerCase()}@trade`;
+            this.websocket = new WebSocket(wsEndpoint);
 
-    async stop(): Promise<void> {
-        if (this.ws) {
-            this.ws.close();
+            this.websocket.on('open', () => {
+                this.connected = true;
+                this.reconnectAttempts = 0;
+                console.log(`WebSocket connected for ${symbol}`);
+            });
+
+            this.websocket.on('message', (data: WebSocket.Data) => {
+                try {
+                    const parsedData = JSON.parse(data.toString());
+                    const marketData: MarketData = {
+                        symbol: symbol,
+                        price: parseFloat(parsedData.p),
+                        volume: parseFloat(parsedData.q),
+                        timestamp: parsedData.T,
+                        rsi: undefined,
+                        macd: undefined,
+                        ema: undefined
+                    };
+                    this.emit('marketData', marketData);
+                } catch (error) {
+                    console.error('Error parsing market data:', error);
+                }
+            });
+
+            this.websocket.on('error', (error) => {
+                console.error('WebSocket error:', error);
+                this.connected = false;
+                this.attemptReconnect(symbol);
+            });
+
+            this.websocket.on('close', () => {
+                this.connected = false;
+                console.log('WebSocket connection closed');
+                this.attemptReconnect(symbol);
+            });
+
+        } catch (error) {
+            console.error('Error connecting to WebSocket:', error);
+            throw error;
         }
-        this.connected = false;
     }
 
-    private connectWebSocket(): void {
-        this.ws = new WebSocket('wss://stream.binance.com:9443/ws/btcusdt@ticker');
-
-        this.ws.on('open', () => {
-            console.log(`[${this.id}] WebSocket connected`);
-            this.connected = true;
-        });
-
-        this.ws.on('message', (data: WebSocket.Data) => {
+    private async attemptReconnect(symbol: string): Promise<void> {
+        if (this.reconnectAttempts < this.MAX_RECONNECT_ATTEMPTS) {
+            this.reconnectAttempts++;
+            console.log(`Attempting to reconnect... (Attempt ${this.reconnectAttempts})`);
+            
+            // Wait for a few seconds before reconnecting
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            
             try {
-                const ticker = JSON.parse(data.toString());
-                this.emit('priceUpdate', {
-                    symbol: 'BTCUSDT',
-                    price: parseFloat(ticker.c),
-                    timestamp: Date.now()
-                });
+                await this.connect(symbol);
             } catch (error) {
-                console.error(`[${this.id}] Error processing message:`, error);
+                console.error('Reconnection attempt failed:', error);
             }
-        });
+        } else {
+            console.error('Max reconnection attempts reached');
+            this.emit('error', new Error('Max reconnection attempts reached'));
+        }
+    }
 
-        this.ws.on('error', (error) => {
-            console.error(`[${this.id}] WebSocket error:`, error);
-        });
-
-        this.ws.on('close', () => {
+    public disconnect(): void {
+        if (this.websocket) {
+            this.websocket.close();
+            this.websocket = null;
             this.connected = false;
-            console.log(`[${this.id}] WebSocket disconnected, reconnecting...`);
-            setTimeout(() => this.connectWebSocket(), 5000);
-        });
+        }
+    }
+
+    public isConnected(): boolean {
+        return this.connected;
+    }
+
+    public getConnectionStatus(): string {
+        return this.connected ? 'Connected' : 'Disconnected';
     }
 }
+
+export default MarketDataAgent;

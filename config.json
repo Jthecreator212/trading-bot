@@ -1,15 +1,19 @@
 {
-    "exchange": "binance",
-    "apiKey": "your-binance-api-key",
-    "apiSecret": "your-binance-api-secret",
-    "pairs": ["BTCUSDT", "ETHUSDT"],
-    "intervals": {
-        "default": 60000
-    },
-    "risk": {
+    "tradingPair": "BTCUSDT",
+    "wsEndpoint": "wss://stream.binance.com:9443/ws/btcusdt@kline_1m",
+    "riskParameters": {
         "maxPositionSize": 1000,
         "maxDrawdownPercent": 2,
         "stopLossPercent": 1,
         "takeProfitPercent": 2
+    },
+    "database": {
+        "enabled": false,
+        "type": "sqlite",
+        "path": "./data/trading.db"
+    },
+    "logging": {
+        "level": "info",
+        "file": "./logs/trading.log"
     }
 }

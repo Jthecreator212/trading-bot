@@ -1,84 +1,44 @@
 import { MarketData } from '../types';
-import { Logger } from './Logger';
-
-interface CacheItem<T> {
-    data: T;
-    timestamp: number;
-}
 
 export class DataManager {
-    private static instance: DataManager;
-    private logger: Logger;
-    private cache: Map<string, CacheItem<any>>;
-    private readonly DEFAULT_TTL = 60000; // 1 minute default TTL
+    private marketData: Map<string, MarketData[]> = new Map();
+    private readonly maxDataPoints = 1000;
 
-    private constructor() {
-        this.logger = Logger.getInstance();
-        this.cache = new Map();
-    }
-
-    static getInstance(): DataManager {
-        if (!DataManager.instance) {
-            DataManager.instance = new DataManager();
-        }
-        return DataManager.instance;
-    }
-
-    async cacheMarketData(symbol: string, data: MarketData): Promise<void> {
-        const key = `market_${symbol}`;
-        this.cache.set(key, {
-            data,
-            timestamp: Date.now()
-        });
-        this.logger.debug(`Cached market data for ${symbol}`, data);
-    }
-
-    async getMarketData(symbol: string, maxAge: number = this.DEFAULT_TTL): Promise<MarketData | null> {
-        const key = `market_${symbol}`;
-        const cached = this.cache.get(key);
-
-        if (cached && Date.now() - cached.timestamp < maxAge) {
-            return cached.data;
+    public storeMarketData(symbol: string, data: MarketData): void {
+        if (!this.marketData.has(symbol)) {
+            this.marketData.set(symbol, []);
         }
 
-        this.logger.debug(`Cache miss for ${symbol}`);
-        return null;
-    }
+        const symbolData = this.marketData.get(symbol)!;
+        symbolData.push(data);
 
-    async clearCache(): Promise<void> {
-        this.cache.clear();
-        this.logger.info('Cache cleared');
-    }
-
-    // Helper method to store OHLCV data
-    async cacheOHLCV(symbol: string, timeframe: string, data: any[]): Promise<void> {
-        const key = `ohlcv_${symbol}_${timeframe}`;
-        this.cache.set(key, {
-            data,
-            timestamp: Date.now()
-        });
-    }
-
-    // Helper method to get OHLCV data
-    async getOHLCV(symbol: string, timeframe: string, maxAge: number = this.DEFAULT_TTL): Promise<any[] | null> {
-        const key = `ohlcv_${symbol}_${timeframe}`;
-        const cached = this.cache.get(key);
-
-        if (cached && Date.now() - cached.timestamp < maxAge) {
-            return cached.data;
+        // Keep only the most recent data points
+        if (symbolData.length > this.maxDataPoints) {
+            symbolData.shift();
         }
-
-        return null;
     }
 
-    // Method to clean up old cache entries
-    private cleanupCache(): void {
-        const now = Date.now();
-        for (const [key, value] of this.cache.entries()) {
-            if (now - value.timestamp > this.DEFAULT_TTL) {
-                this.cache.delete(key);
-                this.logger.debug(`Cleaned up cached data for ${key}`);
-            }
-        }
+    public getRecentData(symbol: string, count: number = 50): MarketData[] {
+        const symbolData = this.marketData.get(symbol);
+        if (!symbolData) return [];
+
+        return symbolData.slice(-count);
+    }
+
+    public getLatestData(symbol: string): MarketData | null {
+        const symbolData = this.marketData.get(symbol);
+        if (!symbolData || symbolData.length === 0) return null;
+
+        return symbolData[symbolData.length - 1];
+    }
+
+    public clearData(symbol: string): void {
+        this.marketData.delete(symbol);
+    }
+
+    public getAllSymbols(): string[] {
+        return Array.from(this.marketData.keys());
     }
 }
+
+export default DataManager;

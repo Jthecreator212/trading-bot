@@ -1,121 +1,224 @@
-import { EventEmitter } from 'events';
-import { Logger } from './Logger';
-import { ConfigManager } from './ConfigManager';
+import { MarketData, MLSignal, MarketRegime, TradingSignal } from '../types';
+import { MarketDataAgent } from '../agents/market/MarketDataAgent';
+import { DataManager } from './DataManager';
 import { RiskManager } from './RiskManager';
-import { PositionManager } from './PositionManager';
-import { MarketDepth } from './MarketDepth';
-import { TradeLogger } from './TradeLogger';
-import { WebSocketManager } from './WebSocketManager';
-import { MarketSentimentAnalyzer } from './MarketSentimentAnalyzer';
-import { PerformanceTracker } from './PerformanceTracker';
-import { NotificationService } from './NotificationService';
-import { MonitoringService } from '../monitoring/MonitoringService';
+import { MLSignalGenerator } from './ml/MLSignalGenerator';
+import { MarketRegimeAnalyzer } from './analysis/MarketRegimeAnalyzer';
+import { Logger } from './Logger';
+import { Config } from './config/Config';
+import { strategies, StrategyType } from '../strategies';
+import { TrendFollowingStrategy } from '../strategies/trendFollowing';
 
-export class TradingEngine extends EventEmitter {
-    private static instance: TradingEngine;
-    private components: Map<string, any>;
-    private logger: Logger;
-    private config: ConfigManager;
+export class Engine {
+    private components: Map<string, any> = new Map();
+    private strategies: Map<StrategyType, any> = new Map();
+    private marketDataAgent: MarketDataAgent;
+    private dataManager: DataManager;
     private riskManager: RiskManager;
-    private positionManager: PositionManager;
-    private marketDepth: MarketDepth;
-    private tradeLogger: TradeLogger;
-    private wsManager: WebSocketManager;
-    private sentimentAnalyzer: MarketSentimentAnalyzer;
-    private performanceTracker: PerformanceTracker;
-    private notificationService: NotificationService;
-    private monitoringService: MonitoringService;
-    private isRunning: boolean = false;
+    private mlSignalGenerator: MLSignalGenerator;
+    private regimeAnalyzer: MarketRegimeAnalyzer;
 
-    private constructor() {
-        super();
-        this.components = new Map();
+    constructor() {
         this.initializeComponents();
-        this.setupEventHandlers();
+        this.initializeStrategies();
     }
 
     private initializeComponents(): void {
-        this.logger = Logger.getInstance();
-        this.config = new ConfigManager();
-        this.riskManager = new RiskManager();
-        this.positionManager = new PositionManager();
-        this.marketDepth = new MarketDepth();
-        this.tradeLogger = new TradeLogger();
-        this.wsManager = new WebSocketManager();
-        this.sentimentAnalyzer = new MarketSentimentAnalyzer();
-        this.performanceTracker = new PerformanceTracker();
-        this.notificationService = new NotificationService();
-        this.monitoringService = new MonitoringService();
+        // Initialize logger first
+        const logger = new Logger();
+        this.components.set('logger', logger);
+        logger.info('Registered component: logger');
 
-        // Register core components
-        this.register('logger', this.logger);
-        this.register('config', this.config);
-        this.register('riskManager', this.riskManager);
-        this.register('positionManager', this.positionManager);
-        this.register('marketDepth', this.marketDepth);
-        this.register('tradeLogger', this.tradeLogger);
-        this.register('wsManager', this.wsManager);
-        this.register('sentimentAnalyzer', this.sentimentAnalyzer);
-        this.register('performanceTracker', this.performanceTracker);
-        this.register('notificationService', this.notificationService);
-        this.register('monitoringService', this.monitoringService);
+        // Initialize config with proper instantiation
+        const config = new Config();
+        this.components.set('config', config);
+        logger.info('Registered component: config');
+
+        // Initialize other components
+        const components = [
+            ['riskManager', new RiskManager()],
+            ['positionManager', {}],
+            ['marketDepth', {}],
+            ['tradeLogger', {}],
+            ['wsManager', {}],
+            ['performanceTracker', {}],
+            ['notificationService', {}],
+            ['dataManager', new DataManager()],
+            ['regimeAnalyzer', new MarketRegimeAnalyzer()],
+            ['mlSignalGenerator', new MLSignalGenerator()],
+            ['marketDataAgent', new MarketDataAgent()]
+        ];
+
+        components.forEach(([name, component]) => {
+            this.components.set(name as string, component);
+            logger.info(`Registered component: ${name}`);
+        });
+
+        // Store references for frequently accessed components
+        this.marketDataAgent = this.components.get('marketDataAgent');
+        this.dataManager = this.components.get('dataManager');
+        this.riskManager = this.components.get('riskManager');
+        this.mlSignalGenerator = this.components.get('mlSignalGenerator');
+        this.regimeAnalyzer = this.components.get('regimeAnalyzer');
+    }
+
+    private initializeStrategies(): void {
+        this.strategies.set(
+            StrategyType.TREND_FOLLOWING,
+            new TrendFollowingStrategy(strategies[StrategyType.TREND_FOLLOWING].config)
+        );
     }
 
     private setupEventHandlers(): void {
-        this.monitoringService.on('metrics', (metrics) => {
-            this.logger.info('System metrics update:', metrics);
+        const logger = this.components.get('logger');
+
+        this.marketDataAgent.on('marketData', async (data) => {
+            try {
+                // Store and process market data
+                this.dataManager.storeMarketData(data.symbol, data);
+                this.components.get('marketDepth').update(data);
+                this.components.get('tradeLogger').logMarketData(data);
+
+                // Get recent data for analysis
+                const recentData = this.dataManager.getRecentData(data.symbol, 50);
+                
+                if (!recentData || recentData.length === 0) {
+                    logger.warn('No recent data available for analysis');
+                    return;
+                }
+
+                // Analyze market regime
+                const marketRegime = this.regimeAnalyzer.analyzeMarketConditions(recentData);
+
+                // Process strategies
+                await this.processStrategies(recentData);
+
+                // Generate ML signals
+                try {
+                    const mlSignal = await this.mlSignalGenerator.generateSignals(recentData);
+
+                    // Log analysis results
+                    logger.info('Market Analysis:', {
+                        regime: marketRegime ? {
+                            type: marketRegime.regime,
+                            confidence: `${marketRegime.confidence}%`,
+                            recommendations: marketRegime.recommendations || []
+                        } : 'No regime data',
+                        mlSignal: mlSignal ? {
+                            action: mlSignal.type,
+                            confidence: `${(mlSignal.confidence * 100).toFixed(2)}%`
+                        } : 'No ML signal',
+                        currentPrice: data.price,
+                        volume24h: data.volume
+                    });
+
+                    // Process ML signals if confidence is high
+                    if (mlSignal && mlSignal.confidence > 0.8) {
+                        await this.processMLSignal(mlSignal, marketRegime);
+                    }
+                } catch (mlError) {
+                    logger.error('Error generating ML signals:', mlError);
+                }
+
+            } catch (error) {
+                logger.error('Error processing market data:', {
+                    error: error.message,
+                    data: {
+                        symbol: data.symbol,
+                        price: data.price,
+                        timestamp: data.timestamp
+                    }
+                });
+            }
         });
-
-        this.performanceTracker.on('performanceUpdate', (metrics) => {
-            this.monitoringService.trackMetric('performance', metrics);
-        });
     }
 
-    public static getInstance(): TradingEngine {
-        if (!TradingEngine.instance) {
-            TradingEngine.instance = new TradingEngine();
-        }
-        return TradingEngine.instance;
-    }
+    private async processMLSignal(mlSignal: MLSignal, marketRegime: MarketRegime): Promise<void> {
+        const logger = this.components.get('logger');
+        const positionManager = this.components.get('positionManager');
+        const config = this.components.get('config');
 
-    public register(name: string, component: any): void {
-        this.components.set(name, component);
-        this.logger.info(`Registered component: ${name}`);
-    }
-
-    public getComponent<T>(name: string): T {
-        return this.components.get(name) as T;
-    }
-
-    public start(): void {
         try {
-            this.isRunning = true;
-            this.monitoringService.startMonitoring();
-            const wsUrl = process.env.WEBSOCKET_URL || 'wss://stream.binance.com:9443/ws';
-            this.wsManager.connect(wsUrl, 'yourSymbol');
-            this.logger.info('Trading Engine started');
-            this.emit('engineStart');
+            if (mlSignal.confidence > 0.8 && marketRegime.confidence > 0.7) {
+                const tradingSignal = {
+                    type: mlSignal.type,
+                    symbol: config.get('tradingPair'),
+                    price: this.dataManager.getLatestData(config.get('tradingPair'))?.price || 0,
+                    confidence: mlSignal.confidence,
+                    timestamp: Date.now(),
+                    source: 'ML'
+                };
+
+                await positionManager.handleMLSignal(tradingSignal, marketRegime);
+                logger.info('ML Signal Processed:', {
+                    signal: tradingSignal,
+                    regime: marketRegime
+                });
+            }
         } catch (error) {
-            this.logger.error('Failed to start Trading Engine:', error);
-            this.stop();
+            logger.error('Error processing ML signal:', {
+                error: error.message,
+                signal: mlSignal,
+                regime: marketRegime
+            });
         }
     }
 
-    public stop(): void {
+    private async processSignal(signal: TradingSignal): Promise<void> {
+        const logger = this.components.get('logger');
         try {
-            this.isRunning = false;
-            this.monitoringService.stopMonitoring();
-            this.wsManager.disconnect();
-            this.logger.info('Trading Engine stopped');
-            this.emit('engineStop');
+            if (this.riskManager.assessRisk(signal, {})) {
+                await this.components.get('positionManager').handleSignal(signal);
+                logger.info('Trading signal processed:', signal);
+            }
         } catch (error) {
-            this.logger.error('Error stopping Trading Engine:', error);
+            logger.error('Error processing trading signal:', {
+                error: error.message,
+                signal
+            });
         }
     }
 
-    public isEngineRunning(): boolean {
-        return this.isRunning;
+    private async processStrategies(marketData: MarketData[]): Promise<void> {
+        for (const [type, strategy] of this.strategies) {
+            const signal = strategy.analyze(marketData);
+            if (signal) {
+                await this.processSignal(signal);
+            }
+        }
+    }
+
+    public async start(): Promise<void> {
+        const logger = this.components.get('logger');
+        const config = this.components.get('config');
+        
+        try {
+            logger.info('Trading Bot Starting...');
+
+            // Initialize risk parameters
+            const riskParams = config.get('riskParameters');
+            this.riskManager.updateParameters(riskParams);
+            logger.info('Risk parameters updated:', [riskParams]);
+
+            // Start monitoring
+            logger.info('Starting monitoring service');
+            this.setupEventHandlers();
+
+            // Connect to market data
+            const tradingPair = config.get('tradingPair');
+            logger.info(`Connecting to WebSocket for ${tradingPair}`);
+            await this.marketDataAgent.connect(tradingPair);
+
+            logger.info('Trading Engine started');
+        } catch (error) {
+            logger.error('Error starting trading engine:', error);
+            throw error;
+        }
+    }
+
+    public getComponent(name: string): any {
+        return this.components.get(name);
     }
 }
 
-export default TradingEngine;
+export default Engine;
